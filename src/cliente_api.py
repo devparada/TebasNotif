@@ -1,36 +1,54 @@
-import json
-import urllib.error
-import urllib.request
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen, Request
 
 
 class ClienteHayFutbol:
-    def __init__(self, url: str = "https://hayahora.futbol/estado/data.json", timeout: int = 5):
-        self.url = url
-        self.timeout = timeout
+    def __init__(self, base_url: str = "https://hayahora.futbol/estado/"):
+        self.base_url = base_url.rstrip('/') + '/'
+        # Lista de archivos de control de bloqueo de los principales operadores
+        self.archivos_operadores = [
+            "blocked-digi.txt",
+            "blocked-masmovil.txt",
+            "blocked-movistar.txt",
+            "blocked-orange.txt",
+            "blocked-vodafone.txt"
+        ]
 
-    def comprobar_estado_global(self) -> str:
+    def comprobar_estado_global(self, timeout: int = 5) -> str:
         """
-        Analiza el JSON de la API a nivel global.
-        Si el estado más reciente de CUALQUIER elemento es False, se considera que está BLOQUEADO.
+        Determina si internet está libre comprobando el contenido de los archivos de bloqueo.
+        Si todos están vacíos o no se encuentran bloqueos activos, la red está LIBRE.
         """
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            peticion = urllib.request.Request(self.url, headers=headers)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        bloqueo_detectado = False
+        peticiones_correctas = 0
 
-            with urllib.request.urlopen(peticion, timeout=self.timeout) as respuesta:
-                if respuesta.status == 200:
-                    json_data = json.loads(respuesta.read().decode('utf-8'))
+        for archivo in self.archivos_operadores:
+            url_archivo = f"{self.base_url}{archivo}"
+            try:
+                peticion = Request(url_archivo, headers=headers)
+                with urlopen(peticion, timeout=timeout) as respuesta:
+                    if respuesta.status == 200:
+                        peticiones_correctas += 1
+                        # Leemos el contenido limpiando espacios y saltos de línea
+                        contenido = respuesta.read().decode("utf-8").strip()
 
-                    for item in json_data.get("data", []):
-                        cambios = item.get("stateChanges", [])
+                        if contenido:
+                            bloqueo_detectado = True
+                            break
 
-                        if cambios:
-                            ultimo_estado = cambios[-1].get("state")
-
-                            if ultimo_estado is False:
-                                return "BLOQUEADO"
-                    return "LIBRE"
+            except HTTPError as e:
+                if e.code == 404:
+                    peticiones_correctas += 1
+                    continue
+                return "ERROR"
+            except (URLError, TimeoutError):
                 return "ERROR"
 
-        except urllib.error.HTTPError:
+        if peticiones_correctas == 0:
             return "ERROR"
+
+        if bloqueo_detectado:
+            return "BLOQUEADO"
+
+        return "LIBRE"
